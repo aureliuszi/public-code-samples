@@ -1,0 +1,145 @@
+---
+title: "Sample Analysis of Twitter Data"
+output: html_notebook
+---
+
+
+```{r}
+#load libraries of interest
+if(!suppressWarnings(require(pacman))){install.packages("pacman");library("pacman")}
+p_load(DBI,RMariaDB,dplyr,dbplyr,Hmisc,tidyverse,hablar,academictwitteR, corrplot, Hmisc, PerformanceAnalytics)
+## clear global environment
+rm(list = ls())
+```
+
+```{r}
+### remove rejected users
+users = read.csv("data/users-with-rejection-criteria.csv")
+users = filter(users, users$reject_created_recent == 0 &
+                 users$reject_failed_attn == 0 &
+                 users$reject_verified == 0 &
+                 users$reject_too_many_followers == 0)
+
+### read twitter data
+library(jsonlite)
+d = fromJSON("data/tweets-with-sentiment.json") %>% as.data.frame
+```
+
+
+```{r}
+### remove duplicate variables for easy merging
+d = select(d, -id)
+users = select(users, -id)
+d = select(d, - created_at)
+users = select(users, - created_at)
+
+### group by user (used for LM)
+sent_by_user = d %>% group_by(username) %>%
+  summarise(neg = mean(neg),
+            pos = mean(pos),
+            neu = mean(neu),
+            compound = mean(compound))
+sent_by_user = left_join(users, sent_by_user)
+
+### remove tweets not in users$username (approved users)
+d = filter(d, d$username %in% users$username)
+
+### merge
+users$username = as.character(users$username)
+
+tweets_by_user = merge(d, users, on ="username")
+```
+
+
+
+
+```{r}
+## count participants with no tweets (therefore no sentiment)
+filter(sent_by_user,is.na(sent_by_user$neg))
+
+## demographics
+summary(users$age)
+table(users$gender)
+table(users$education)
+summary(users$var1)
+summary(users$var2)
+summary(users$followers_count)
+summary(users$friends_count)
+summary(users$favourites_count)
+summary(users$statuses_count)
+summary(d$compound)
+summary(d$neg)
+summary(d$neu)
+summary(d$pos)
+
+### histograms
+hist(users$var1)
+hist(users$var2)
+hist(users$followers_count)
+hist(users$friends_count)
+hist(users$favourites_count)
+hist(users$statuses_count)
+
+hist(d$compound)
+hist(d$neg)
+hist(d$neu)
+hist(d$pos)
+```
+
+```{r}
+
+library(lme4)
+library(lmerTest)
+
+r = lm(friends_count ~ var1*var2, data = users); summary(r) ## significant
+r = lm(followers_count ~ var1*var2, data = users); summary(r)
+r = lm(statuses_count ~ var1*var2, data = users); summary(r)
+r = lm(favourites_count ~ var1*var2, data = users); summary(r)
+
+
+### all are significant once normalized
+hist(log(users$friends_count+1))
+r = lm(log(friends_count+1) ~ var1*var2, data = users); summary(r)
+r = lm(log(followers_count+1) ~ var1*var2, data = users); summary(r)
+r = lm(log(statuses_count+1) ~ var1*var2, data = users); summary(r)
+r = lm(log(favourites_count+1) ~ var1*var2, data = users); summary(r)
+
+```
+
+
+```{r}
+
+### LM tests for emotional and var1/var2
+r = lm(var2 ~ pos, data =  sent_by_user); summary(r)
+r = lm(var2 ~ neg, data =  sent_by_user); summary(r)
+r = lm(var2 ~ neu, data =  sent_by_user); summary(r)
+r = lm(var2 ~ compound, data =  sent_by_user); summary(r)
+
+r = lm(var1 ~ pos, data =  sent_by_user); summary(r)
+r = lm(var1 ~ neg, data =  sent_by_user); summary(r)
+r = lm(var1 ~ neu, data =  sent_by_user); summary(r)
+r = lm(var1 ~ compound, data =  sent_by_user); summary(r)
+```
+
+```{r}
+### LMER tests for emotion and var1/var2 by user
+### all fail to converge
+r = lmer(var2 ~ pos + (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var2 ~ neg+ (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var2 ~ neu+ (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var2 ~ compound+ (1|username), data =  tweets_by_user); summary(r)
+
+r = lmer(var1 ~ pos+ (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var1 ~ neg+ (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var1 ~ neu+ (1|username), data =  tweets_by_user); summary(r)
+r = lmer(var1 ~ compound+ (1|username), data =  tweets_by_user); summary(r)
+
+### interaction between var1/var2 predicting emotion (insignificant)
+r = lmer(pos ~ var1*var2 + (1|username), data = tweets_by_user); summary(r)
+r = lmer(neg ~ var1*var2 + (1|username), data = tweets_by_user); summary(r)
+r = lmer(neu ~ var1*var2 + (1|username), data = tweets_by_user); summary(r)
+r = lmer(compound ~ var1*var2+ (1|username), data = tweets_by_user); summary(r)
+
+```
+
+
